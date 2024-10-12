@@ -1,89 +1,152 @@
 #include "http.h"
 
-void handle_request(int sockfd, char *request, int request_len)
+void handle_request(int sockfd)
 {
-    if (recv(sockfd, request, request_len, 0) == -1) {
+    char request[BUFFERLEN];
+    if (recv(sockfd, request, sizeof request, 0) == -1) {
         perror("recv");
         return;
     }
 
-    char reqtype[5];
-    char filename[10];
-    sscanf(request, "%4s %9s ", reqtype, filename);
-    printf("Request type is %s\nfilename: \"%s\"\n", reqtype, filename);
+    // TODO: this looks ugly
+    char reqtype[4];
+    char url[100];
+    sscanf(request, "%3s %99s HTTP/1.1", reqtype, url);
 
-    char response[2048];
-    memset(response, 0, sizeof response);
+    char file[104];
+    snprintf(file, 104, "root%s", url);
+    char *filename = file;
+
+    printf("Filename: %s\n", filename);
+
     if (streq(reqtype, "GET")) {
-        char buf[2048];
-        int content_len = -1;
-        memset(buf, 0, sizeof buf);
-
-        if (streq(filename, "/")) { // root request
-            if ((content_len = read_file("index.html", buf, sizeof buf)) == -1) {
-                create_response_404(response);
-            } else {
-                // TODO: make it more abstract
-                // TODO: add mime types check (using strchr to check extension)
-                create_response_root(response, buf, content_len);
-            }
-        } else { // other requested files
-            create_response_404(response);
+        if (streq(filename, "root/")) {
+            sprintf(filename, "root/index.html");
+            send_response_200(sockfd, filename);
+        } else if (!file_exist(filename)) {
+            send_response_404(sockfd);
+        } else {
+            send_response_200(sockfd, filename);
         }
-    } else { // other request types
-        create_response_404(response);
-    }
-
-    printf("Response:\n%s\n", response);
-
-    int response_len = strlen(response)+1;
-    send_response(sockfd, response, response_len);
-}
-
-void send_response(int sockfd, char *response, int response_len)
-{
-    if (send(sockfd, response, response_len, 0) == -1) {
-        perror("send");
+    } else {
+        send_response_404(sockfd);
     }
 }
 
-void create_response_date(char *date)
+char *get_mime_type(char *filename)
 {
-    time_t current_time = time(NULL);
-    struct tm *tm_local = gmtime(&current_time);
+    char *extension = strchr(filename, '.');
 
-    char week[10], month[10], day[10], time[10], year[10];
-    sscanf(asctime(tm_local), "%9s %9s %9s %9s %9s\n", week, month, day, time, year);
-    sprintf(date, "Date: %s, %s %s %s %s GMT\n", week, day, month, year, time);
+    if (extension == NULL)
+        return "application/octet-stream";
+
+    extension++; // delete '.'
+
+    // most common one
+    if (streq(extension, "html") || streq(extension, "htm")) return "text/html";
+    else if (streq(extension, "txt")) return "text/plain";
+    else if (streq(extension, "ico")) return "image/vnd.microsoft.icon";
+    else if (streq(extension, "jpeg") || streq(extension, "jpg")) return "image/jpeg";
+    else if (streq(extension, "csv")) return "text/csv";
+    else if (streq(extension, "pdf")) return "application/pdf";
+    else if (streq(extension, "epub")) return "application/epub+zip";
+    else if (streq(extension, "docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    else if (streq(extension, "doc")) return "application/msword";
+    else if (streq(extension, "json")) return "application/json";
+    else if (streq(extension, "gif")) return "image/gif";
+    else if (streq(extension, "png")) return "image/png";
+    else if (streq(extension, "mp3")) return "audio/mpeg";
+    else if (streq(extension, "mp4")) return "video/mp4";
+    else if (streq(extension, "mpeg")) return "video/mpeg";
+
+    return "application/octet-stream";
 }
 
-void create_response_404(char *response)
+void send_response_404(int fd)
 {
-    strcat(response, "HTTP/1.1 404 NOT FOUND\n");
+    char header[HEADERLEN];
+    char content_type[FIELDLEN];
+    char body[BODYLEN] = "404 Not Found";
 
-    // is this a good way to concat strings?
-    char date[62];
-    create_response_date(date);
-    strcat(response, date);
-    strcat(response, "Connection: close\n");
-    strcat(response, "Content-Length: 13\n");
-    strcat(response, "Content-Type: text/plain\n\n");
-    strcat(response, "404 Not Found");
+    time_t rawtime;
+    time(&rawtime);
+    char date[100];
+    strftime(date, sizeof date, "%a, %d %b %Y %H:%M:%S GMT", localtime(&rawtime));
+
+    snprintf(header, HEADERLEN, "HTTP/1.1 404 NOT FOUND\r\nDate: %s\r\nConnection: close\r\nContent-Length: %ld\r\n", date, strlen(body));
+    snprintf(content_type, FIELDLEN, "Content-Type: text/plain\r\n\r\n");
+
+    char response[BUFFERLEN];
+    snprintf(response, BUFFERLEN, "%s%s%s", header, content_type, body);
+
+    if (send_data(fd, response, strlen(response)) == -1)
+        close(fd);
 }
 
-void create_response_root(char *response, char *body, int content_len)
+void send_response_200(int fd, char *filename)
 {
-    strcat(response, "HTTP/1.1 200 OK\n");
+    char header[HEADERLEN];
+    char content_type[FIELDLEN];
+    char data[BODYLEN];
 
-    // is this a good way to concat strings?
-    char date[62];
-    create_response_date(date);
-    strcat(response, date);
-    strcat(response, "Connection: close\n");
-    char cont_str[100];
-    snprintf(cont_str, 100, "Content-length: %d\n", content_len);
-    printf("%s\n", cont_str);
-    strcat(response, cont_str);
-    strcat(response, "Content-Type: text/html\n\n");
-    strcat(response, body);
+    time_t rawtime;
+    time(&rawtime);
+    char date[100];
+    strftime(date, sizeof date, "%a, %d %b %Y %H:%M:%S GMT", localtime(&rawtime));
+
+    FILE *fp = fopen(filename, "rb");
+    if (fp == NULL) {
+        send_response_404(fd);
+        return;
+    }
+
+    fseek(fp, 0, SEEK_END);
+    int length = ftell(fp);
+    if (length <= 0) {
+        fprintf(stderr, "File length is %d\n", length);
+        send_response_404(fd);
+        return;
+    }
+    rewind(fp);
+
+    snprintf(header, HEADERLEN, "HTTP/1.1 200 OK\r\nDate: %s\r\nConnection: close\r\nContent-Length: %d\r\n", date, length);
+    snprintf(content_type, FIELDLEN, "Content-Type: %s\r\n\r\n", get_mime_type(filename));
+
+    char response[BUFFERLEN];
+    snprintf(response, BUFFERLEN, "%s%s", header, content_type);
+
+    if (send_data(fd, response, strlen(response)) == -1) {
+        fprintf(stderr, "Failed to send header\n");
+        close(fd);
+        return;
+    }
+
+    while (length > 0) {
+        int bytes = fread(data, 1, min(length, sizeof(data)), fp);
+        if (bytes < 1) {
+            close(fd);
+            break;
+        }
+        if (send_data(fd, data, bytes) == -1) {
+            close(fd);
+            break;
+        }
+        //printf("Sent %d bytes\n", bytes);
+        length -= bytes;
+    }
+}
+
+int send_data(int fd, void *data, int datasize)
+{
+    char *ptr = (char*)data;
+    ssize_t bytes;
+
+    while (datasize > 0) {
+        bytes = send(fd, data, datasize, 0);
+        if (bytes < 0) return -1;
+        ptr += bytes;
+        datasize -= bytes;
+    }
+
+    return 0;
 }

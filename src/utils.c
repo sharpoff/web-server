@@ -1,26 +1,9 @@
 #include "utils.h"
 
-int read_file(char *filename, char *buffer, int buf_size)
+int file_exist(char *filename)
 {
-    FILE *fp = NULL;
-    if (!(fp = fopen(filename, "r"))) {
-        fprintf(stderr, "failed to open file: %s", filename);
-        return -1;
-    }
-    if (fp == NULL) {
-        fprintf(stderr, "file pointer is null\n");
-        return -1;
-    }
-
-    int s = 0;
-    for (char ch = getc(fp); ch != EOF; ch = getc(fp)) {
-        buffer[s++] = ch;
-    }
-    fclose(fp);
-
-    printf("read_file buf with size %d:\n%s\n", s, buffer);
-
-    return s;
+    struct stat statbuffer;
+    return stat(filename, &statbuffer) == 0 ? 1 : 0;
 }
 
 int streq(char *str1, char *str2)

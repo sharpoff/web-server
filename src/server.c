@@ -10,7 +10,7 @@
 
 #include "http.h"
 
-#define PORT "1337" // leeeeet port
+#define PORT "1337"
 
 void *get_in_addr(struct sockaddr *in) {
     if (in->sa_family == AF_INET)
@@ -74,11 +74,7 @@ int main(int argc, char **argv)
         inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr*)&client_addr), client_ip, sizeof client_ip);
         printf("server: got connection from %s\n", client_ip);
 
-        // process request and make response
-        char request[2048];
-        handle_request(clientfd, request, sizeof request);
-
-        close(clientfd);
+        handle_request(clientfd);
     }
 
     close(servfd);
